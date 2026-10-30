@@ -1,7 +1,8 @@
 
   # Build Codemate Website
 
-  This is a code bundle for Build Codemate Website. The original project is available at https://www.figma.com/design/VLp2ChkCttCGddXO0Bzw6I/Build-Codemate-Website.
+  This is a code bundle for  Codemate W. The original project is available at 
+  https://connectwithcodemate.vercel.app/
 
   ## Running the code
 
