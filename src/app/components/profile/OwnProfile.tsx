@@ -14,9 +14,11 @@ import { ProjectCard } from '../projects/ProjectCard';
 import { CreateProjectModal } from '../projects/CreateProjectModal';
 import {
   Loader2, MapPin, Users, UserCheck, Calendar, Briefcase, FileText,
-  PenSquare, CalendarPlus, FolderPlus, Settings, LogOut, Edit3,
+  PenSquare, CalendarPlus, FolderPlus, Settings, LogOut, Edit3, Pencil,
   ChevronDown, Linkedin, Github
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { PROFILE_IMAGE_ACCEPT, validateProfileImageFile } from '../../utils/profile-images';
 
 interface OwnProfileProps {
   onCreatePost: () => void;
@@ -52,6 +54,9 @@ export function OwnProfile({
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingProject, setEditingProject] = useState<any>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const profilePictureInputRef = useRef<HTMLInputElement>(null);
+  const coverPictureInputRef = useRef<HTMLInputElement>(null);
+  const [imageUploadInProgress, setImageUploadInProgress] = useState<'profile' | 'cover' | null>(null);
 
   useEffect(() => {
     if (user?.id) {
@@ -149,6 +154,42 @@ export function OwnProfile({
     onEditProfile();
   };
 
+  const handleImageSelection = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    imageType: 'profile' | 'cover',
+  ) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+
+    const validationError = validateProfileImageFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    setImageUploadInProgress(imageType);
+    try {
+      const result = imageType === 'profile'
+        ? await profileAPI.uploadPicture(file)
+        : await profileAPI.uploadCoverPicture(file);
+      const imageUrl = imageType === 'profile' ? result.profilePicture : result.coverPicture;
+      if (typeof imageUrl !== 'string' || !imageUrl) {
+        throw new Error('The image upload did not return a saved image URL.');
+      }
+
+      const profileField = imageType === 'profile' ? 'profilePicture' : 'coverPicture';
+      setProfileData((current: any) => ({ ...(current || user || {}), [profileField]: imageUrl }));
+      updateUser({ [profileField]: imageUrl } as any);
+      toast.success(imageType === 'profile' ? 'Profile picture updated.' : 'Cover photo updated.');
+    } catch (uploadError) {
+      toast.error(uploadError instanceof Error ? uploadError.message : 'Image upload failed. Please try again.');
+    } finally {
+      setImageUploadInProgress(null);
+    }
+  };
+
   const profile = profileData || user;
 
   if (loading) {
@@ -168,6 +209,38 @@ export function OwnProfile({
         <CardContent className="p-0">
           {/* Cover */}
           <div className="h-36 bg-gradient-to-r from-blue-600 via-violet-600 to-purple-600 relative overflow-hidden">
+            {profile.coverPicture && (
+              <img
+                src={profile.coverPicture}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            )}
+            <input
+              ref={coverPictureInputRef}
+              type="file"
+              accept={PROFILE_IMAGE_ACCEPT}
+              className="hidden"
+              aria-label="Choose a cover photo"
+              onChange={(event) => void handleImageSelection(event, 'cover')}
+            />
+            <button
+              type="button"
+              title="Change cover photo"
+              aria-label="Change cover photo"
+              aria-busy={imageUploadInProgress === 'cover'}
+              disabled={imageUploadInProgress !== null}
+              onClick={() => coverPictureInputRef.current?.click()}
+              className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/40 bg-black/55 text-white shadow transition hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-wait"
+            >
+              {imageUploadInProgress === 'cover'
+                ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                : <Pencil aria-hidden="true" className="h-4 w-4" />}
+            </button>
+            {imageUploadInProgress === 'cover' && (
+              <span className="sr-only" role="status">Uploading cover photo</span>
+            )}
             <div className="absolute inset-0 opacity-10" style={{
               backgroundImage: "radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)",
               backgroundSize: "40px 40px"
@@ -178,6 +251,14 @@ export function OwnProfile({
             {/* Avatar + Actions row */}
             <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-16 mb-4">
               <div className="relative flex-shrink-0">
+                <input
+                  ref={profilePictureInputRef}
+                  type="file"
+                  accept={PROFILE_IMAGE_ACCEPT}
+                  className="hidden"
+                  aria-label="Choose a profile picture"
+                  onChange={(event) => void handleImageSelection(event, 'profile')}
+                />
                 <Avatar className="w-28 h-28 border-4 border-background shadow-lg">
                   {profile.profilePicture && (
                     <AvatarImage src={profile.profilePicture} alt={profile.name} />
@@ -186,8 +267,24 @@ export function OwnProfile({
                     {getInitials(profile.name || 'U')}
                   </AvatarFallback>
                 </Avatar>
+                <button
+                  type="button"
+                  title="Change profile picture"
+                  aria-label="Change profile picture"
+                  aria-busy={imageUploadInProgress === 'profile'}
+                  disabled={imageUploadInProgress !== null}
+                  onClick={() => profilePictureInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 z-20 flex h-8 w-8 items-center justify-center rounded-full border-2 border-background bg-background text-foreground shadow transition hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+                >
+                  {imageUploadInProgress === 'profile'
+                    ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    : <Pencil aria-hidden="true" className="h-4 w-4" />}
+                </button>
+                {imageUploadInProgress === 'profile' && (
+                  <span className="sr-only" role="status">Uploading profile picture</span>
+                )}
                 <div
-                  className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-4 border-background ${getAvailabilityColor(profile.availability)}`}
+                  className={`absolute bottom-2 left-2 w-5 h-5 rounded-full border-4 border-background ${getAvailabilityColor(profile.availability)}`}
                   title={profile.availability || 'Status unknown'}
                 />
               </div>

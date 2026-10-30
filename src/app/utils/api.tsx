@@ -54,6 +54,28 @@ export async function apiCall(endpoint: string, options: RequestInit = {}, requi
 }
 
 // Profile API
+const uploadProfileImage = async (endpoint: string, fieldName: string, file: File) => {
+  const accessToken = localStorage.getItem('accessToken');
+  const formData = new FormData();
+  formData.append(fieldName, file);
+
+  const response = await fetch(API_BASE + endpoint, {
+    method: 'POST',
+    headers: {
+      'apikey': supabasePublishableKey || supabaseAnonKey,
+      'Authorization': 'Bearer ' + (accessToken || supabaseAnonKey),
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+    throw new Error(error.error || 'Failed to upload image');
+  }
+
+  return response.json();
+};
+
 export const profileAPI = {
   get: (userId: string) => apiCall(`/profile/${userId}`),
   update: (updates: any) => apiCall('/profile', {
@@ -61,26 +83,8 @@ export const profileAPI = {
     body: JSON.stringify(updates)
   }),
   checkUsername: (username: string) => apiCall(`/profile/check-username/${username}`),
-  uploadPicture: async (file: File) => {
-    const accessToken = localStorage.getItem('accessToken');
-    const formData = new FormData();
-    formData.append('picture', file);
-    
-    const response = await fetch(`${API_BASE}/profile/picture`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken || supabaseAnonKey}`
-      },
-      body: formData
-    });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
-      throw new Error(error.error || 'Failed to upload picture');
-    }
-    
-    return response.json();
-  },
+  uploadPicture: (file: File) => uploadProfileImage('/profile/picture', 'picture', file),
+  uploadCoverPicture: (file: File) => uploadProfileImage('/profile/cover-picture', 'cover', file),
   deletePicture: () => apiCall('/profile/picture', { method: 'DELETE' })
 };
 

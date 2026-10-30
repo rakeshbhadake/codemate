@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../utils/auth-context';
 import { profileAPI } from '../../utils/api';
-import { ProfilePictureUpload } from './ProfilePictureUpload';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -25,7 +24,6 @@ export function ProfileEditor({ onBack }: ProfileEditorProps = {}) {
     location: user?.location || '',
     availability: user?.availability || 'available',
     skills: user?.skills || [],
-    profilePicture: (user as any)?.profilePicture || null,
     linkedin_url: (user as any)?.linkedin_url || '',
     github_url: (user as any)?.github_url || '',
   });
@@ -84,12 +82,6 @@ export function ProfileEditor({ onBack }: ProfileEditorProps = {}) {
     }
   };
 
-  const handlePictureUpdated = (url: string | null) => {
-    setFormData(prev => ({ ...prev, profilePicture: url }));
-    updateUser({ ...user, profilePicture: url } as any);
-    setMessage({ type: 'success', text: 'Profile picture updated!' });
-  };
-  
   useEffect(() => {
     return () => {
       if (usernameCheckTimeout) {
@@ -168,22 +160,6 @@ export function ProfileEditor({ onBack }: ProfileEditorProps = {}) {
                 <AlertDescription>{message.text}</AlertDescription>
               </Alert>
             )}
-
-            {/* Profile Picture */}
-            <div className="space-y-2">
-              <Label>Profile Picture</Label>
-              <div className="flex items-center gap-4">
-                <ProfilePictureUpload
-                  currentPicture={formData.profilePicture}
-                  userName={formData.name}
-                  onPictureUpdated={handlePictureUpdated}
-                />
-                <div className="text-sm text-muted-foreground">
-                  <p>Click to update your profile picture</p>
-                  <p>Supported: JPG, PNG, WEBP (max 5MB)</p>
-                </div>
-              </div>
-            </div>
 
             <div className="space-y-2">
               <Label htmlFor="name">Full Name</Label>

@@ -210,7 +210,16 @@ export function UserProfile({ userId, onBack, onMessageUser, onViewProfile }: Us
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {/* Cover Background */}
-          <div className="h-32 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500" />
+          <div className="relative h-32 overflow-hidden bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500">
+            {userData.coverPicture && (
+              <img
+                src={userData.coverPicture}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            )}
+          </div>
           
           {/* Profile Info */}
           <div className="px-6 pb-6">

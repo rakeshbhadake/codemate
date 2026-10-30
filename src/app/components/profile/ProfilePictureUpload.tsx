@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { profileAPI } from '../../utils/api';
+import { validateProfileImageFile } from '../../utils/profile-images';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -24,16 +25,12 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      setError('Please select a JPG, PNG, or WEBP image');
-      return;
-    }
-
-    // Validate file size (5MB)
-    if (file.size > 5242880) {
-      setError('Image must be less than 5MB');
+    const validationError = validateProfileImageFile(file);
+    if (validationError) {
+      setError(validationError);
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      e.currentTarget.value = '';
       return;
     }
 
@@ -60,6 +57,7 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
       setIsOpen(false);
       setSelectedFile(null);
       setPreviewUrl(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       setError(err.message || 'Failed to upload picture');
     } finally {
@@ -105,6 +103,8 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
           </AvatarFallback>
         </Avatar>
         <button
+          type="button"
+          aria-label="Edit profile picture"
           onClick={() => setIsOpen(true)}
           className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
         >
@@ -151,6 +151,7 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
             {!selectedFile ? (
               <div className="flex gap-2">
                 <Button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="flex-1"
                   disabled={isUploading}
@@ -160,6 +161,7 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
                 </Button>
                 {currentPicture && (
                   <Button
+                    type="button"
                     onClick={handleDelete}
                     variant="destructive"
                     disabled={isUploading}
@@ -175,6 +177,7 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
             ) : (
               <div className="flex gap-2">
                 <Button
+                  type="button"
                   onClick={handleUpload}
                   className="flex-1"
                   disabled={isUploading}
@@ -192,6 +195,7 @@ export function ProfilePictureUpload({ currentPicture, userName, onPictureUpdate
                   )}
                 </Button>
                 <Button
+                  type="button"
                   onClick={() => {
                     setSelectedFile(null);
                     setPreviewUrl(null);
