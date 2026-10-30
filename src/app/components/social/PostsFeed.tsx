@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { postsAPI, usersAPI, messagingAPI } from '../../utils/api';
 import { PostCard } from './PostCard';
 import { Button } from '../ui/button';
@@ -10,9 +10,54 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Badge } from '../ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Plus, Loader2, Upload, X, FileText, Image as ImageIcon, Video, TrendingUp, Bookmark, AtSign } from 'lucide-react';
+import { Plus, Loader2, Upload, X, FileText, Image as ImageIcon, Video, TrendingUp, Bookmark, AtSign, Search } from 'lucide-react';
 import { Alert, AlertDescription } from '../ui/alert';
 import { toast } from 'sonner';
+
+const normalizeHashtag = (hashtag: unknown) =>
+  typeof hashtag === 'string'
+    ? hashtag.trim().replace(/^#/, '').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase()
+    : '';
+
+const hasExactHashtag = (post: any, hashtag: string) => {
+  const postHashtags = Array.isArray(post.hashtags) ? post.hashtags : [];
+  if (postHashtags.some((tag: unknown) => normalizeHashtag(tag) === hashtag)) return true;
+
+  const hashtagPattern = new RegExp(
+    '(^|[^\\p{L}\\p{N}_])#' + hashtag + '(?![\\p{L}\\p{N}_])',
+    'iu',
+  );
+  return hashtagPattern.test([post.caption, post.title].filter(Boolean).join(' '));
+};
+
+const postMatchesSearch = (post: any, query: string) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+
+  const requestedHashtags = [...normalizedQuery.matchAll(/#([\p{L}\p{N}_]+)/gu)]
+    .map((match) => match[1]);
+  const keywordTerms = normalizedQuery
+    .replace(/#[\p{L}\p{N}_]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const searchableText = [
+    post.caption,
+    post.title,
+    post.link,
+    post.linkText,
+    ...(Array.isArray(post.hashtags) ? post.hashtags : []),
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  return requestedHashtags.every((hashtag) => hasExactHashtag(post, hashtag))
+    && keywordTerms.every((term) => searchableText.includes(term));
+};
+
+const getSelectedHashtag = (query: string) =>
+  query.trim().match(/^#([\p{L}\p{N}_]+)$/u)?.[1].toLowerCase() ?? '';
 
 interface PostsFeedProps {
   onViewProfile?: (userId: string) => void;
@@ -30,6 +75,8 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
   const [activeTab, setActiveTab] = useState('feed');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isBookmarksLoading, setIsBookmarksLoading] = useState(false);
 
   const [newPost, setNewPost] = useState({
     caption: '',
@@ -52,7 +99,11 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
   const mentionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const postRefs = useRef<{ [postId: string]: HTMLDivElement | null }>({});
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null);
-
+  const activeHashtag = getSelectedHashtag(searchQuery);
+  const filteredPosts = useMemo(() => {
+    const sourcePosts = activeTab === 'bookmarks' ? bookmarkedPosts : posts;
+    return sourcePosts.filter((post) => postMatchesSearch(post, searchQuery));
+  }, [activeTab, bookmarkedPosts, posts, searchQuery]);
   useEffect(() => {
     loadPosts();
     loadTrending();
@@ -107,11 +158,14 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
   };
 
   const loadBookmarks = async () => {
+    setIsBookmarksLoading(true);
     try {
       const result = await postsAPI.getBookmarks();
       setBookmarkedPosts(result.posts || []);
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
+    } finally {
+      setIsBookmarksLoading(false);
     }
   };
 
@@ -377,18 +431,59 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
               </TabsTrigger>
             </TabsList>
 
+            <div role="search" className="relative mt-4">
+              <label htmlFor="post-search" className="sr-only">Search posts</label>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                id="post-search"
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && searchQuery) {
+                    event.preventDefault();
+                    setSearchQuery('');
+                  }
+                }}
+                placeholder="Search posts by keyword or #hashtag..."
+                className="h-11 rounded-xl bg-card pl-10 pr-10 shadow-sm"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  aria-label="Clear post search"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
             <TabsContent value="feed" className="space-y-4 mt-4">
-              {posts.length === 0 ? (
+              {filteredPosts.length === 0 ? (
                 <Card>
                   <CardContent className="p-12 text-center">
-                    <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="mb-2">No posts yet</h3>
-                    <p className="text-muted-foreground">Go to your profile to create your first post!</p>
+                    {searchQuery.trim() ? (
+                      <>
+                        <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        <p role="status" className="text-muted-foreground">No posts found. Try another keyword or hashtag.</p>
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        <h3 className="mb-2">No posts yet</h3>
+                        <p className="text-muted-foreground">Go to your profile to create your first post!</p>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  {posts.map((post) => (
+                  {filteredPosts.map((post) => (
                     <div
                       key={post.id}
                       ref={(el) => { postRefs.current[post.id] = el; }}
@@ -411,17 +506,30 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
             </TabsContent>
 
             <TabsContent value="bookmarks" className="space-y-4 mt-4">
-              {bookmarkedPosts.length === 0 ? (
+              {isBookmarksLoading ? (
+                <div className="flex items-center justify-center py-12" role="status" aria-label="Loading saved posts">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : filteredPosts.length === 0 ? (
                 <Card>
                   <CardContent className="p-12 text-center">
-                    <Bookmark className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="mb-2">No saved posts</h3>
-                    <p className="text-muted-foreground">Bookmark posts to see them here</p>
+                    {searchQuery.trim() ? (
+                      <>
+                        <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        <p role="status" className="text-muted-foreground">No posts found. Try another keyword or hashtag.</p>
+                      </>
+                    ) : (
+                      <>
+                        <Bookmark className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        <h3 className="mb-2">No saved posts</h3>
+                        <p className="text-muted-foreground">Bookmark posts to see them here</p>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  {bookmarkedPosts.map((post) => (
+                  {filteredPosts.map((post) => (
                     <PostCard
                       key={post.id}
                       post={post}
@@ -451,11 +559,21 @@ export function PostsFeed({ onViewProfile, highlightPostId, openCreateModal }: P
               </CardHeader>
               <CardContent className="space-y-3">
                 {trendingHashtags.map((tag: any, index: number) => (
-                  <div key={tag.hashtag} className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">#{tag.hashtag}</p>
-                      <p className="text-sm text-muted-foreground">{tag.count} posts</p>
-                    </div>
+                  <div key={tag.hashtag} className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      aria-pressed={activeHashtag === normalizeHashtag(tag.hashtag)}
+                      onClick={() => {
+                        const normalizedTag = normalizeHashtag(tag.hashtag);
+                        setSearchQuery(activeHashtag === normalizedTag ? '' : '#' + normalizedTag);
+                      }}
+                      className={activeHashtag === normalizeHashtag(tag.hashtag)
+                        ? 'min-w-0 flex-1 rounded-lg bg-primary/10 px-2 py-1 text-left text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                        : 'min-w-0 flex-1 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'}
+                    >
+                      <span className="block font-medium">#{tag.hashtag}</span>
+                      <span className="block text-sm text-muted-foreground">{tag.count} posts</span>
+                    </button>
                     <Badge variant="secondary">{index + 1}</Badge>
                   </div>
                 ))}
