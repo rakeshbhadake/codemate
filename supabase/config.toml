@@ -1,0 +1,5 @@
+[functions.make-server-9386b22c]
+# Preserve the existing function source while deploying it under the URL slug
+# used by the Vite client. The source itself prefixes routes with this slug.
+entrypoint = "./functions/server/index.tsx"
+verify_jwt = true
