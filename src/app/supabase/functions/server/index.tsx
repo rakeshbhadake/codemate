@@ -14,7 +14,7 @@ app.use(
   "/*",
   cors({
     origin: "*",
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "apikey"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
@@ -409,6 +409,72 @@ app.get("/make-server-9386b22c/profile/check-username/:username", async (c) => {
   }
 });
 
+const profileImagesBucket = 'make-9386b22c-profile-pictures';
+const profileImageExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
+const getProfileImageStoragePath = (imageUrl: string | null | undefined) => {
+  if (!imageUrl) return null;
+  try {
+    const path = new URL(imageUrl).pathname;
+    const publicBucketPath = '/storage/v1/object/public/' + profileImagesBucket + '/';
+    if (!path.startsWith(publicBucketPath)) return null;
+    return decodeURIComponent(path.slice(publicBucketPath.length));
+  } catch {
+    return null;
+  }
+};
+
+const saveProfileImage = async (
+  userId: string,
+  file: File,
+  profileField: 'profilePicture' | 'coverPicture',
+  folder: 'profiles' | 'covers',
+) => {
+  const extension = profileImageExtensions[file.type];
+  const objectPath = folder + '/' + userId + '/' + crypto.randomUUID() + '.' + extension;
+  const bucket = supabase.storage.from(profileImagesBucket);
+  const { error: uploadError } = await bucket.upload(objectPath, file, {
+    contentType: file.type,
+    upsert: false,
+  });
+
+  if (uploadError) throw new Error('Failed to upload image: ' + uploadError.message);
+
+  const { data: { publicUrl } } = bucket.getPublicUrl(objectPath);
+  const currentProfile = await kv.get('user:' + userId) || {};
+  const updatedProfile = {
+    ...currentProfile,
+    [profileField]: publicUrl,
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await kv.set('user:' + userId, updatedProfile);
+  } catch (error) {
+    await bucket.remove([objectPath]).catch(() => undefined);
+    throw error;
+  }
+
+  const previousPath = getProfileImageStoragePath(currentProfile[profileField]);
+  if (previousPath && previousPath !== objectPath) {
+    const { error: cleanupError } = await bucket.remove([previousPath]);
+    if (cleanupError) console.warn('Could not remove replaced profile image:', cleanupError.message);
+  }
+
+  return publicUrl;
+};
+
+const validateProfileImage = (file: FormDataEntryValue | null) => {
+  if (!(file instanceof File) || file.size === 0) return 'Please choose an image file.';
+  if (!profileImageExtensions[file.type]) return 'Invalid file type. Only JPG, PNG, and WEBP are allowed.';
+  if (file.size > 5 * 1024 * 1024) return 'Image must be 5MB or smaller.';
+  return null;
+};
+
 // Upload profile picture
 app.post("/make-server-9386b22c/profile/picture", async (c) => {
   try {
@@ -419,68 +485,34 @@ app.post("/make-server-9386b22c/profile/picture", async (c) => {
 
     const formData = await c.req.formData();
     // Accept both 'picture' (frontend field name) and legacy 'file'
-    const file = (formData.get('picture') || formData.get('file')) as File;
+    const file = formData.get('picture') || formData.get('file');
+    const validationError = validateProfileImage(file);
+    if (validationError) return c.json({ error: validationError }, 400);
 
-    if (!file) {
-      return c.json({ error: "No file provided" }, 400);
-    }
-
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      return c.json({ error: "Invalid file type. Only JPG, PNG, and WEBP are allowed" }, 400);
-    }
-
-    // Validate file size (5MB max)
-    if (file.size > 5242880) {
-      return c.json({ error: "File size must be less than 5MB" }, 400);
-    }
-
-    const bucketName = 'make-9386b22c-profile-pictures';
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-
-    // Delete old profile picture if exists
-    const currentProfile = await kv.get(`user:${user.id}`);
-    if (currentProfile?.profilePicture) {
-      const oldFileName = currentProfile.profilePicture.split('/').pop();
-      await supabase.storage.from(bucketName).remove([oldFileName]);
-    }
-
-    // Upload new picture
-    const { data, error } = await supabase.storage
-      .from(bucketName)
-      .upload(fileName, file, {
-        contentType: file.type,
-        upsert: true
-      });
-
-    if (error) {
-      console.error("Upload error:", error);
-      return c.json({ error: "Failed to upload profile picture" }, 500);
-    }
-
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucketName)
-      .getPublicUrl(fileName);
-
-    // Update profile with new picture URL
-    const updatedProfile = {
-      ...currentProfile,
-      profilePicture: publicUrl,
-      updatedAt: new Date().toISOString()
-    };
-
-    await kv.set(`user:${user.id}`, updatedProfile);
-
-    return c.json({ 
-      success: true,
-      profilePicture: publicUrl
-    });
+    const publicUrl = await saveProfileImage(user.id, file as File, 'profilePicture', 'profiles');
+    return c.json({ success: true, profilePicture: publicUrl });
   } catch (error) {
     console.error("Profile picture upload error:", error);
-    return c.json({ error: "Failed to upload profile picture" }, 500);
+    return c.json({ error: error instanceof Error ? error.message : "Failed to upload profile picture" }, 500);
+  }
+});
+
+// Upload the current user's cover picture without touching the profile picture.
+app.post("/make-server-9386b22c/profile/cover-picture", async (c) => {
+  try {
+    const user = await getAuthenticatedUser(c.req.header('Authorization'));
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const formData = await c.req.formData();
+    const file = formData.get('cover');
+    const validationError = validateProfileImage(file);
+    if (validationError) return c.json({ error: validationError }, 400);
+
+    const publicUrl = await saveProfileImage(user.id, file as File, 'coverPicture', 'covers');
+    return c.json({ success: true, coverPicture: publicUrl });
+  } catch (error) {
+    console.error("Cover picture upload error:", error);
+    return c.json({ error: error instanceof Error ? error.message : "Failed to upload cover picture" }, 500);
   }
 });
 
@@ -495,11 +527,6 @@ app.delete("/make-server-9386b22c/profile/picture", async (c) => {
     const currentProfile = await kv.get(`user:${user.id}`);
     
     if (currentProfile?.profilePicture) {
-      const bucketName = 'make-9386b22c-profile-pictures';
-      const fileName = currentProfile.profilePicture.split('/').pop();
-      
-      await supabase.storage.from(bucketName).remove([fileName]);
-      
       const updatedProfile = {
         ...currentProfile,
         profilePicture: null,
@@ -507,6 +534,11 @@ app.delete("/make-server-9386b22c/profile/picture", async (c) => {
       };
 
       await kv.set(`user:${user.id}`, updatedProfile);
+      const previousPath = getProfileImageStoragePath(currentProfile.profilePicture);
+      if (previousPath) {
+        const { error: deleteError } = await supabase.storage.from(profileImagesBucket).remove([previousPath]);
+        if (deleteError) console.warn('Could not remove deleted profile picture:', deleteError.message);
+      }
     }
 
     return c.json({ success: true });
