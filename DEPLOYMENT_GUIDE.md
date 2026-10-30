@@ -28,7 +28,9 @@ storage, and Edge Function service.
 
 Install Git for Windows, Node.js (20 LTS or newer), and npm. Docker Desktop is
 only needed if you want to run Supabase locally. The current package lockfile
-is `package-lock.json`, so use npm. To check the tools in PowerShell:
+is `package-lock.json`, so use npm. The Supabase CLI is included as a local
+dev dependency; invoke it with `npx supabase` (there is no global `supabase`
+command). To check the tools in PowerShell:
 
 ```powershell
 git --version
@@ -107,20 +109,20 @@ GEMINI_API_KEY=your-real-gemini-api-key
 Then upload that secret with:
 
 ```powershell
-supabase secrets set --env-file supabase/functions/.env
+npx supabase secrets set --env-file supabase/functions/.env
 ```
 
 For local Edge Function development, run the local Supabase stack and serve the
 function with:
 
 ```powershell
-supabase functions serve make-server-9386b22c --env-file supabase/functions/.env
+npx supabase functions serve make-server-9386b22c --env-file supabase/functions/.env
 ```
 
 Supabase documents that the local Edge Function runtime reads
 `supabase/functions/.env`; it is different from Vite's `.env.local`. Never
 commit either file. The production secret can also be set individually with
-`supabase secrets set GEMINI_API_KEY="YOUR_REAL_KEY"` after linking the
+`npx supabase secrets set GEMINI_API_KEY="YOUR_REAL_KEY"` after linking the
 project. Avoid putting real keys in screenshots, chat messages, source files,
 or shell history.
 
@@ -131,9 +133,9 @@ configuration maps the public slug the client calls to the current source file
 without moving or duplicating the handler. Install the Supabase CLI and use:
 
 ```powershell
-supabase login
-supabase link --project-ref YOUR_SUPABASE_PROJECT_REF
-supabase functions deploy make-server-9386b22c
+npx supabase login
+npx supabase link --project-ref YOUR_SUPABASE_PROJECT_REF
+npx supabase functions deploy make-server-9386b22c
 ```
 
 Replace `YOUR_SUPABASE_PROJECT_REF` with the project reference in the Supabase
@@ -270,6 +272,7 @@ Site URL and add it to Supabase's Redirect URLs.
 
 | Symptom | Check |
 | --- | --- |
+| Login shows `Invalid API key` | In Vercel, set `VITE_SUPABASE_ANON_KEY` to the anon/public key from the same project as `VITE_SUPABASE_URL`; apply it to Production and redeploy. Do not use the service-role key. |
 | Build reports missing Supabase values | Add both `VITE_SUPABASE_*` variables to the correct Vercel environments and redeploy. |
 | Direct URL returns 404 | Confirm `vercel.json` is present and deployed; it provides the Vite SPA fallback. |
 | Supabase request returns 401 | Confirm the URL/key match the Supabase project, JWT verification remains enabled, and authenticated requests use the current session token. |

@@ -1,4 +1,4 @@
-import { publicAnonKey, supabaseUrl } from './supabase/info';
+import { supabaseAnonKey, supabasePublishableKey, supabaseUrl } from './supabase/info';
 import { createClient } from './supabase/client';
 
 const API_BASE = `${supabaseUrl}/functions/v1/make-server-9386b22c`;
@@ -12,7 +12,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}, requi
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
+        'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
         ...options.headers
       }
     });
@@ -69,7 +69,7 @@ export const profileAPI = {
     const response = await fetch(`${API_BASE}/profile/picture`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`
+        'Authorization': `Bearer ${accessToken || supabaseAnonKey}`
       },
       body: formData
     });
@@ -116,7 +116,7 @@ export const eventsAPI = {
       formData.append('banner', bannerFile);
       return fetch(`${API_BASE}/events`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken || publicAnonKey}` },
+        headers: { 'Authorization': `Bearer ${accessToken || supabaseAnonKey}` },
         body: formData
       }).then(async res => {
         if (!res.ok) {
@@ -178,7 +178,7 @@ export const projectsAPI = {
     const accessToken = localStorage.getItem('accessToken');
     return fetch(`${API_BASE}/projects`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${accessToken || publicAnonKey}` },
+      headers: { 'Authorization': `Bearer ${accessToken || supabaseAnonKey}` },
       body: projectData
     }).then(async res => {
       if (!res.ok) {
@@ -205,7 +205,7 @@ export const postsAPI = {
     return fetch(`${API_BASE}/posts`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`
+        'Authorization': `Bearer ${accessToken || supabaseAnonKey}`
       },
       body: postData
     }).then(async response => {
