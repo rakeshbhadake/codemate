@@ -291,6 +291,7 @@ function AppContent() {
         <ErrorBoundary>
           {currentView === 'dashboard' && (
             <Dashboard
+              onNavigate={handleNavigate}
               onMessageUser={handleMessageUser}
               onViewProfile={handleViewUserProfile}
             />

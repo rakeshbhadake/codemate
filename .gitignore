@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 coverage/
+demo-video/
 
 # Environment files and secrets
 .env

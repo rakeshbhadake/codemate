@@ -8,6 +8,7 @@ import {
 import { FollowersModal } from './FollowersModal';
 
 interface DashboardProps {
+  onNavigate: (view: string) => void;
   onMessageUser?: (userId: string, userName: string) => void;
   onViewProfile?: (userId: string) => void;
 }
@@ -53,7 +54,7 @@ const QUICK_ACTIONS = [
   },
 ];
 
-export function Dashboard({ onMessageUser, onViewProfile }: DashboardProps) {
+export function Dashboard({ onNavigate, onMessageUser, onViewProfile }: DashboardProps) {
   const { user, updateUser } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'followers' | 'following'>('followers');
@@ -177,6 +178,8 @@ export function Dashboard({ onMessageUser, onViewProfile }: DashboardProps) {
           {QUICK_ACTIONS.map((action) => (
             <button
               key={action.label}
+              type="button"
+              onClick={() => onNavigate(action.view)}
               className={`group flex items-center gap-3 p-4 rounded-xl border border-border bg-card transition-all text-left ${action.bg}`}
             >
               <span className={`flex items-center justify-center w-8 h-8 rounded-lg bg-current/10 border border-current/15 shrink-0 ${action.accent}`}>
