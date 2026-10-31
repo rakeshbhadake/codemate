@@ -6,6 +6,23 @@ import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
 import { Loader2, Search, Download, Check, X, ChevronDown, ChevronRight, Users } from 'lucide-react';
+import { toast } from 'sonner';
+
+type RegistrationStatus = 'approved' | 'pending' | 'rejected' | 'unknown';
+
+const normalizeRegistrationStatus = (value: unknown): RegistrationStatus => {
+  if (typeof value !== 'string') return 'unknown';
+  const status = value.trim().toLowerCase();
+  if (status === 'approved') return 'approved';
+  if (status === 'pending') return 'pending';
+  if (status === 'rejected') return 'rejected';
+  return 'unknown';
+};
+
+const normalizeRegistration = (registration: any) => ({
+  ...registration,
+  status: normalizeRegistrationStatus(registration.status ?? registration.approvalStatus ?? registration.approval_status)
+});
 
 interface EventRegistrationsViewProps {
   open: boolean;
@@ -16,6 +33,7 @@ interface EventRegistrationsViewProps {
 export function EventRegistrationsView({ open, onOpenChange, event }: EventRegistrationsViewProps) {
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'time' | 'name'>('time');
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
@@ -29,35 +47,18 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
 
   const loadRegistrations = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const result = await eventsAPI.getRegistrations(event.id);
-      const apiRegs = result.registrations || [];
-      // Merge with any locally-stored registrations (created when API was unavailable)
-      const localRegs = getLocalRegistrations(event.id);
-      const merged = mergeRegistrations(apiRegs, localRegs);
-      setRegistrations(merged);
-    } catch {
-      // API endpoint unavailable — use only local storage
-      setRegistrations(getLocalRegistrations(event.id));
+      setRegistrations((result.registrations || []).map(normalizeRegistration));
+    } catch (error) {
+      console.error('Failed to load event registrations:', error);
+      setRegistrations([]);
+      setLoadError(error instanceof Error ? error.message : 'Could not load registrations. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
-
-  function getLocalRegistrations(eventId: string): any[] {
-    try {
-      return JSON.parse(localStorage.getItem(`event_registrations_${eventId}`) || '[]');
-    } catch {
-      return [];
-    }
-  }
-
-  // Deduplicate by id: API records take precedence over local ones.
-  function mergeRegistrations(apiRegs: any[], localRegs: any[]): any[] {
-    const apiIds = new Set(apiRegs.map((r: any) => r.id));
-    const onlyLocal = localRegs.filter(r => !apiIds.has(r.id));
-    return [...apiRegs, ...onlyLocal];
-  }
 
   const isRegistrationOpen = () => {
     if (!event?.registrationDeadline) return true;
@@ -92,7 +93,8 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
   const stats = {
     total: registrations.length,
     approved: registrations.filter(r => r.status === 'approved').length,
-    pending: registrations.filter(r => !r.status || r.status === 'pending').length,
+    pending: registrations.filter(r => r.status === 'pending').length,
+    rejected: registrations.filter(r => r.status === 'rejected').length,
     remaining: event?.maxTeams ? Math.max(0, Number(event.maxTeams) - registrations.length) : null
   };
 
@@ -109,7 +111,7 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
         r.leaderEmail || '',
         String(r.members?.length || 0),
         r.createdAt ? new Date(r.createdAt).toLocaleString() : '',
-        r.status || 'pending'
+        r.status
       ];
       if (!r.members || r.members.length === 0) {
         rows.push(baseRow.concat(['', '', '']));
@@ -137,28 +139,23 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
     URL.revokeObjectURL(url);
   };
 
-  const updateStatus = async (registrationId: string, status: string) => {
+  const updateStatus = async (registration: any, status: Exclude<RegistrationStatus, 'unknown'>) => {
+    if (updatingId || registration.status !== 'pending') return;
+    const registrationId = registration.id;
     setUpdatingId(registrationId);
     try {
-      try {
-        await eventsAPI.updateRegistration(event.id, registrationId, { status });
-      } catch {
-        // API unavailable — update localStorage record
-        const key = `event_registrations_${event.id}`;
-        try {
-          const existing = JSON.parse(localStorage.getItem(key) || '[]');
-          localStorage.setItem(
-            key,
-            JSON.stringify(existing.map((r: any) => r.id === registrationId ? { ...r, status } : r))
-          );
-        } catch {}
-      }
-      // Update UI state regardless of which path succeeded
-      setRegistrations(prev =>
-        prev.map(r => r.id === registrationId ? { ...r, status } : r)
-      );
+      const result = await eventsAPI.updateRegistration(event.id, registrationId, {
+        status,
+        expectedStatus: registration.status
+      });
+      if (!result?.registration?.id) throw new Error('The server did not confirm the registration update.');
+      setRegistrations((previous) => previous.map((item) =>
+        item.id === registrationId ? normalizeRegistration(result.registration) : item
+      ));
+      toast.success(`Team ${status}`);
     } catch (error) {
       console.error('Failed to update status:', error);
+      toast.error(error instanceof Error ? error.message : 'Could not update registration status. Please try again.');
     } finally {
       setUpdatingId(null);
     }
@@ -175,7 +172,7 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
 
         <div className="space-y-4">
           {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Card>
               <CardContent className="p-3 text-center">
                 <p className="text-2xl font-semibold">{stats.total}</p>
@@ -192,6 +189,12 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
               <CardContent className="p-3 text-center">
                 <p className="text-2xl font-semibold text-muted-foreground">{stats.pending}</p>
                 <p className="text-xs text-muted-foreground">Pending</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-2xl font-semibold text-destructive">{stats.rejected}</p>
+                <p className="text-xs text-muted-foreground">Rejected</p>
               </CardContent>
             </Card>
             <Card>
@@ -243,6 +246,11 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
+          ) : loadError ? (
+            <div className="space-y-3 py-8 text-center">
+              <p className="text-sm text-destructive">Could not load registrations: {loadError}</p>
+              <Button variant="outline" size="sm" onClick={loadRegistrations}>Retry</Button>
+            </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
@@ -279,40 +287,43 @@ export function EventRegistrationsView({ open, onOpenChange, event }: EventRegis
 
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         <Badge
-                          variant={
-                            reg.status === 'approved' ? 'default' :
-                            reg.status === 'rejected' ? 'destructive' :
-                            'secondary'
-                          }
+                          variant={reg.status === 'approved' ? 'default' : reg.status === 'rejected' ? 'destructive' : 'secondary'}
                           className="text-xs"
                         >
-                          {reg.status || 'pending'}
+                          {reg.status === 'unknown' ? 'Unknown status' : reg.status}
                         </Badge>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-                          onClick={() => updateStatus(reg.id, 'approved')}
-                          disabled={updatingId === reg.id}
-                          title="Approve"
-                        >
-                          {updatingId === reg.id
-                            ? <Loader2 className="w-3 h-3 animate-spin" />
-                            : <Check className="w-3 h-3" />
-                          }
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                          onClick={() => updateStatus(reg.id, 'rejected')}
-                          disabled={updatingId === reg.id}
-                          title="Reject"
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
+                        {reg.status === 'pending' && (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+                              onClick={() => updateStatus(reg, 'approved')}
+                              disabled={Boolean(updatingId)}
+                              title="Approve"
+                            >
+                              {updatingId === reg.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <Check className="w-3 h-3" />
+                              }
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                              onClick={() => updateStatus(reg, 'rejected')}
+                              disabled={Boolean(updatingId)}
+                              title="Reject"
+                            >
+                              {updatingId === reg.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <X className="w-3 h-3" />
+                              }
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
 

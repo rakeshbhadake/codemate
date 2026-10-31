@@ -91,7 +91,8 @@ export const profileAPI = {
 // Users API
 export const usersAPI = {
   getById: (userId: string) => apiCall(`/users/${userId}`),
-  search: (query: string) => apiCall(`/users/search?q=${encodeURIComponent(query)}`)
+  search: (query: string) => apiCall(`/users/search?q=${encodeURIComponent(query)}`),
+  discover: () => apiCall('/users/discover')
 };
 
 // Social API
@@ -156,6 +157,15 @@ export const messagingAPI = {
   send: (recipientId: string, text: string) => apiCall('/messages/send', {
     method: 'POST',
     body: JSON.stringify({ recipientId, text })
+  }),
+  sendSharedPost: (recipientId: string, postId: string, clientMessageId: string) => apiCall('/messages/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      recipientId,
+      messageType: 'shared_post',
+      sharedPostId: postId,
+      clientMessageId
+    })
   }),
   getMessages: (otherUserId: string) => apiCall(`/messages/${otherUserId}`),
   getConversations: () => apiCall('/messages/conversations/list')

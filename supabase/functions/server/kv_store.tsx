@@ -85,3 +85,27 @@ export const getByPrefix = async (prefix: string): Promise<any[]> => {
   }
   return data?.map((d) => d.value) ?? [];
 };
+
+// Search for key-value pairs by prefix while preserving each storage key.
+export const getEntriesByPrefix = async (prefix: string): Promise<Array<{ key: string; value: any }>> => {
+  const supabase = client()
+  const { data, error } = await supabase.from("kv_store_9386b22c").select("key, value").like("key", prefix + "%");
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data ?? [];
+};
+
+// Atomically update a stored record only if its current status still matches.
+export const updateIfStatus = async (key: string, expectedStatus: string | null, value: any): Promise<boolean> => {
+  const supabase = client();
+  let query = supabase.from("kv_store_9386b22c").update({ value }).eq("key", key);
+  query = expectedStatus === null
+    ? query.is("value->>status", null)
+    : query.eq("value->>status", expectedStatus);
+  const { data, error } = await query.select("key").maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return Boolean(data);
+};

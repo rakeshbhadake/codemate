@@ -165,6 +165,57 @@ export function ChatInterface({ selectedUserId, selectedUserName, onBack, onView
 
   const messagesByDate = groupMessagesByDate();
 
+  const renderSharedPost = (message: any) => {
+    const sharedPost = message.sharedPost;
+    if (!sharedPost) {
+      return (
+        <div className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+          This shared post is no longer available.
+        </div>
+      );
+    }
+
+    const postAuthor = sharedPost.author || {};
+    const authorName = postAuthor.name || 'Unknown';
+    const firstMedia = Array.isArray(sharedPost.media) ? sharedPost.media[0] : null;
+
+    return (
+      <div className="rounded-lg border border-border bg-card p-3 text-left shadow-sm">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">
+          {message.senderId === user?.id ? 'You shared a post' : 'Shared a post with you'}
+        </p>
+        <div className="mb-2 flex items-center gap-2">
+          <Avatar className="h-8 w-8">
+            {postAuthor.profilePicture && <AvatarImage src={postAuthor.profilePicture} alt={authorName} />}
+            <AvatarFallback>{getInitials(authorName)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{authorName}</p>
+            {postAuthor.username && <p className="truncate text-xs text-muted-foreground">@{postAuthor.username}</p>}
+          </div>
+        </div>
+        {sharedPost.caption && <p className="mb-2 whitespace-pre-wrap break-words text-sm line-clamp-4">{sharedPost.caption}</p>}
+        {!sharedPost.caption && sharedPost.link && (
+          <p className="mb-2 truncate text-sm text-primary">{sharedPost.linkText || sharedPost.link}</p>
+        )}
+        {firstMedia?.url && (firstMedia.type === 'video' ? (
+          <video src={firstMedia.url} controls className="mb-2 max-h-48 w-full rounded-md bg-black object-contain" />
+        ) : (
+          <img src={firstMedia.url} alt="Shared post" className="mb-2 max-h-48 w-full rounded-md object-cover" />
+        ))}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1"
+          onClick={() => handleViewPost(sharedPost.id || message.sharedPostId)}
+        >
+          <ExternalLink className="w-3 h-3" />
+          View Post
+        </Button>
+      </div>
+    );
+  };
+
   if (!selectedUserId) {
     return (
       <Card className="h-[600px] flex items-center justify-center">
@@ -233,6 +284,7 @@ export function ChatInterface({ selectedUserId, selectedUserName, onBack, onView
                     {dayMessages.map((message: any) => {
                       const isOwn = message.senderId === user?.id;
                       const mentionData = parseMentionMessage(message.text);
+                      const isSharedPost = message.messageType === 'shared_post' || message.type === 'shared_post';
 
                       return (
                         <div
@@ -287,6 +339,13 @@ export function ChatInterface({ selectedUserId, selectedUserName, onBack, onView
                                   View Post
                                 </Button>
                               </div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {formatTime(message.createdAt)}
+                              </p>
+                            </div>
+                          ) : isSharedPost ? (
+                            <div className={`max-w-[80%] ${isOwn ? 'text-right' : ''}`}>
+                              {renderSharedPost(message)}
                               <p className="text-xs text-muted-foreground mt-1">
                                 {formatTime(message.createdAt)}
                               </p>

@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../ui/alert-dialog';
 import { ShareModal } from './ShareModal';
+import { SendPostModal } from './SendPostModal';
 import { Heart, MessageCircle, Share2, Send, Bookmark, MoreVertical, Trash2, Edit, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,6 +25,7 @@ export function PostCard({ post, onCommentClick, onUpdate, onViewProfile }: Post
   const [isBookmarking, setIsBookmarking] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showSendPostModal, setShowSendPostModal] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const handleLike = async () => {
@@ -288,8 +290,9 @@ export function PostCard({ post, onCommentClick, onUpdate, onViewProfile }: Post
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleShare}
+              onClick={() => setShowSendPostModal(true)}
               className="gap-2"
+              title="Send post to CodeMate users"
             >
               <Send className="w-4 h-4" />
             </Button>
@@ -314,6 +317,12 @@ export function PostCard({ post, onCommentClick, onUpdate, onViewProfile }: Post
         itemId={post.id}
         itemType="post"
         title={post.caption?.substring(0, 50) || 'Check out this post'}
+      />
+
+      <SendPostModal
+        open={showSendPostModal}
+        onOpenChange={setShowSendPostModal}
+        post={post}
       />
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

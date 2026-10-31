@@ -1074,10 +1074,20 @@ app.post("/make-server-9386b22c/messages/send", async (c) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const { recipientId, text } = await c.req.json();
+    const body = await c.req.json();
+    const { recipientId, text, messageType = 'text', sharedPostId, clientMessageId } = body;
 
-    if (!recipientId || !text) {
-      return c.json({ error: "Recipient ID and text are required" }, 400);
+    if (typeof recipientId !== 'string' || !recipientId || recipientId === user.id) {
+      return c.json({ error: "A different recipient is required" }, 400);
+    }
+    if (!['text', 'shared_post'].includes(messageType)) {
+      return c.json({ error: "Unsupported message type" }, 400);
+    }
+    if (messageType === 'text' && (typeof text !== 'string' || !text.trim())) {
+      return c.json({ error: "Message text is required" }, 400);
+    }
+    if (clientMessageId !== undefined && (typeof clientMessageId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(clientMessageId))) {
+      return c.json({ error: "Invalid message ID" }, 400);
     }
 
     const recipient = await getProfileOrFallback(recipientId);
@@ -1085,27 +1095,63 @@ app.post("/make-server-9386b22c/messages/send", async (c) => {
       return c.json({ error: "Recipient not found" }, 404);
     }
 
-    const messageId = generateId();
+    if (messageType === 'shared_post') {
+      if (typeof sharedPostId !== 'string' || !sharedPostId) {
+        return c.json({ error: "A post reference is required" }, 400);
+      }
+      const post = await kv.get(`post:${sharedPostId}`);
+      if (!post) return c.json({ error: "Post not found or unavailable" }, 404);
+    }
+
+    const messageId = clientMessageId || generateId();
     // Create conversation ID (always use smaller userId first for consistency)
     const conversationId = [user.id, recipientId].sort().join(':');
+    const messageKey = `message:${conversationId}:${messageId}`;
+    const existingMessage = await kv.get(messageKey);
+    const normalizedMessageType = existingMessage?.messageType || 'text';
+    const requestedText = messageType === 'shared_post' ? 'Shared a post' : text;
+    if (existingMessage) {
+      const samePayload = existingMessage.senderId === user.id
+        && existingMessage.recipientId === recipientId
+        && normalizedMessageType === messageType
+        && (messageType === 'shared_post'
+          ? existingMessage.sharedPostId === sharedPostId
+          : existingMessage.text === requestedText);
+      if (!samePayload) return c.json({ error: "Message ID has already been used" }, 409);
+
+      // Repair conversation metadata if a previous request stored the message
+      // but failed before updating the conversation record.
+      const existingConversation = await kv.get(`conversation:${conversationId}`);
+      if (!existingConversation || new Date(existingConversation.lastMessageAt).getTime() <= new Date(existingMessage.createdAt).getTime()) {
+        await kv.set(`conversation:${conversationId}`, {
+          id: conversationId,
+          participants: [user.id, recipientId],
+          lastMessage: existingMessage.text,
+          lastMessageAt: existingMessage.createdAt
+        });
+      }
+      return c.json({ success: true, message: existingMessage, duplicate: true });
+    }
     
     const message = {
       id: messageId,
       conversationId,
       senderId: user.id,
       recipientId,
-      text,
+      text: messageType === 'shared_post' ? 'Shared a post' : text,
+      messageType,
+      ...(messageType === 'shared_post' ? { sharedPostId } : {}),
       read: false,
       createdAt: new Date().toISOString()
     };
 
-    await kv.set(`message:${conversationId}:${messageId}`, message);
+    await kv.set(messageKey, message);
 
     // Update conversation metadata
     await kv.set(`conversation:${conversationId}`, {
       id: conversationId,
       participants: [user.id, recipientId],
-      lastMessage: text,
+      lastMessage: message.text,
       lastMessageAt: message.createdAt
     });
 
@@ -1129,12 +1175,22 @@ app.get("/make-server-9386b22c/messages/:otherUserId", async (c) => {
 
     const messages = await kv.getByPrefix(`message:${conversationId}:`);
 
+    // Shared posts stay references to their original records, so deleted posts
+    // resolve to an unavailable preview instead of breaking message rendering.
+    const enrichedMessages = await Promise.all(messages.map(async (message: any) => {
+      if (message.messageType !== 'shared_post' || !message.sharedPostId) return message;
+      const post = await kv.get(`post:${message.sharedPostId}`);
+      if (!post) return { ...message, sharedPost: null };
+      const author = await getProfileOrFallback(post.authorId);
+      return { ...message, sharedPost: { ...post, author } };
+    }));
+
     // Sort by creation date (oldest first)
-    messages.sort((a: any, b: any) => 
+    enrichedMessages.sort((a: any, b: any) =>
       new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
 
-    return c.json({ messages });
+    return c.json({ messages: enrichedMessages });
   } catch (error) {
     console.log("Get messages error:", error);
     return c.json({ error: "Failed to get messages" }, 500);
@@ -1544,7 +1600,16 @@ app.post("/make-server-9386b22c/events/:eventId/register", async (c) => {
     if (!event) return c.json({ error: "Event not found" }, 404);
     const data = await c.req.json();
     const regId = generateId();
-    const registration = { id: regId, eventId, userId: user.id, ...data, status: 'pending', createdAt: new Date().toISOString() };
+    // IDs, ownership, event relationship, status, and timestamps are assigned
+    // by the server; never allow request data to overwrite them.
+    const registration = {
+      ...data,
+      id: regId,
+      eventId,
+      userId: user.id,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
     await kv.set(`event-reg:${eventId}:${regId}`, registration);
     const regList = await kv.get(`event-regs:${eventId}`) || [];
     if (!regList.includes(regId)) { regList.push(regId); await kv.set(`event-regs:${eventId}`, regList); }
@@ -1560,7 +1625,20 @@ app.get("/make-server-9386b22c/events/:eventId/registrations", async (c) => {
     const user = await getAuthenticatedUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const eventId = c.req.param('eventId');
-    const registrations = await kv.getByPrefix(`event-reg:${eventId}:`);
+    const event = await kv.get(`event:${eventId}`);
+    if (!event) return c.json({ error: "Event not found" }, 404);
+    const isAdmin = user.app_metadata?.role === 'admin' || user.app_metadata?.is_admin === true;
+    if (event.authorId !== user.id && !isAdmin) return c.json({ error: "Forbidden" }, 403);
+    const prefix = `event-reg:${eventId}:`;
+    const entries = await kv.getEntriesByPrefix(prefix);
+    // Earlier records could contain a client-supplied id in their value even
+    // though the database key used the server-generated id. Return the key as
+    // the canonical id so those registrations can now be updated and persisted.
+    const registrations = entries.map(({ key, value }) => ({
+      ...value,
+      id: key.slice(prefix.length),
+      eventId
+    }));
     const enriched = await Promise.all(registrations.map(async (reg: any) => {
       const regUser = await getProfileOrFallback(reg.userId);
       return { ...reg, user: regUser };
@@ -1578,11 +1656,29 @@ app.put("/make-server-9386b22c/events/:eventId/registrations/:regId", async (c) 
     const user = await getAuthenticatedUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const { eventId, regId } = c.req.param();
+    const event = await kv.get(`event:${eventId}`);
+    if (!event) return c.json({ error: "Event not found" }, 404);
+    const isAdmin = user.app_metadata?.role === 'admin' || user.app_metadata?.is_admin === true;
+    if (event.authorId !== user.id && !isAdmin) return c.json({ error: "Forbidden" }, 403);
     const reg = await kv.get(`event-reg:${eventId}:${regId}`);
     if (!reg) return c.json({ error: "Registration not found" }, 404);
+    if (reg.eventId !== eventId) return c.json({ error: "Registration does not belong to this event" }, 400);
     const updates = await c.req.json();
-    const updated = { ...reg, ...updates, id: regId, eventId, updatedAt: new Date().toISOString() };
-    await kv.set(`event-reg:${eventId}:${regId}`, updated);
+    const status = typeof updates.status === 'string' ? updates.status.trim().toLowerCase() : '';
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      return c.json({ error: "Status must be pending, approved, or rejected" }, 400);
+    }
+    const currentStatus = typeof reg.status === 'string' ? reg.status.trim().toLowerCase() : '';
+    const expectedStatus = typeof updates.expectedStatus === 'string' ? updates.expectedStatus.trim().toLowerCase() : '';
+    if (expectedStatus && currentStatus !== expectedStatus && currentStatus !== status) {
+      return c.json({ error: "Registration status changed. Refresh the list before trying again." }, 409);
+    }
+    const registrationKey = `event-reg:${eventId}:${regId}`;
+    const updated = { ...reg, id: regId, eventId, status, updatedAt: new Date().toISOString() };
+    const saved = await kv.updateIfStatus(registrationKey, reg.status ?? null, updated);
+    if (!saved) {
+      return c.json({ error: "Registration status changed. Refresh the list before trying again." }, 409);
+    }
     return c.json({ success: true, registration: updated });
   } catch (error) {
     console.log("Update registration error:", error);

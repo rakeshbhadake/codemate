@@ -69,17 +69,6 @@ interface EventRegistrationModalProps {
 
 const emptyMember = (): Member => ({ name: '', email: '', countryCode: '+91', phone: '' });
 
-// Persist registration to localStorage (used when API endpoint is unavailable)
-function saveRegistrationLocally(eventId: string, data: any) {
-  const key = `event_registrations_${eventId}`;
-  try {
-    const existing: any[] = JSON.parse(localStorage.getItem(key) || '[]');
-    localStorage.setItem(key, JSON.stringify([...existing, data]));
-  } catch {
-    // storage unavailable — silently ignore
-  }
-}
-
 export function EventRegistrationModal({ open, onOpenChange, event, onRegistered }: EventRegistrationModalProps) {
   const { user } = useAuth();
 
@@ -166,7 +155,6 @@ export function EventRegistrationModal({ open, onOpenChange, event, onRegistered
     setIsSubmitting(true);
     try {
       const registrationPayload = {
-        id: `reg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         teamName: teamName.trim(),
         leaderName: user?.name || '',
         leaderEmail: (user as any)?.email || '',
@@ -174,27 +162,20 @@ export function EventRegistrationModal({ open, onOpenChange, event, onRegistered
           name: m.name.trim(),
           email: m.email.trim().toLowerCase(),
           phone: `${m.countryCode}${m.phone.replace(/[\s\-()]/g, '')}`
-        })),
-        createdAt: new Date().toISOString(),
-        status: 'pending'
+        }))
       };
 
-      // Try the backend first; if the endpoint doesn't exist (404) or any other
-      // network error, fall back to localStorage so the form still works.
-      let savedViaApi = false;
-      try {
-        await eventsAPI.register(event.id, registrationPayload);
-        savedViaApi = true;
-      } catch {
-        // Backend endpoint unavailable — persist locally instead.
-        saveRegistrationLocally(event.id, registrationPayload);
-      }
+      // Supabase is the source of truth. Do not report success or create a
+      // local-only registration if the backend write fails.
+      await eventsAPI.register(event.id, registrationPayload);
 
       setSuccess(true);
       toast.success('Team registered successfully!');
       onRegistered?.();
     } catch (err: any) {
-      setError(err.message || 'Failed to register team. Please try again.');
+      const message = err.message || 'Failed to register team. Please try again.';
+      setError(message);
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
